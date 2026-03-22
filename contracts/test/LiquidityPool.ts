@@ -80,4 +80,181 @@ describe('LiquidityPool', function () {
 			pool.addLiquidity(wrongAmountA, wrongAmountB),
 		).to.be.revertedWithCustomError(pool, 'InvalidLiquidityRatio');
 	});
+
+	it('should remove liquidity and return both tokens proportionally', async function () {
+		const { ethers, owner, tokenA, tokenB, pool } = await deployFixture();
+
+		const amountA = ethers.parseUnits('1000', 18);
+		const amountB = ethers.parseUnits('1000', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
+		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB)).wait();
+
+		const lpTokenAddress = await pool.lpToken();
+		const lpToken = await ethers.getContractAt('LPToken', lpTokenAddress);
+
+		const liquidityToRemove = ethers.parseUnits('500', 18);
+
+		const ownerBalanceABefore = await tokenA.balanceOf(owner.address);
+		const ownerBalanceBBefore = await tokenB.balanceOf(owner.address);
+
+		const removeTx = await pool.removeLiquidity(liquidityToRemove);
+		await removeTx.wait();
+
+		const [reserveA, reserveB] = await pool.getReserves();
+
+		expect(reserveA).to.equal(ethers.parseUnits('500', 18));
+		expect(reserveB).to.equal(ethers.parseUnits('500', 18));
+
+		expect(await lpToken.balanceOf(owner.address)).to.equal(
+			ethers.parseUnits('500', 18),
+		);
+
+		expect(await tokenA.balanceOf(owner.address)).to.equal(
+			ownerBalanceABefore + liquidityToRemove,
+		);
+
+		expect(await tokenB.balanceOf(owner.address)).to.equal(
+			ownerBalanceBBefore + liquidityToRemove,
+		);
+	});
+
+	it('should revert when trying to remove zero liquidity', async function () {
+		const { ethers, pool } = await deployFixture();
+
+		await expect(
+			pool.removeLiquidity(ethers.parseUnits('0', 18)),
+		).to.be.revertedWithCustomError(pool, 'InvalidAmount');
+	});
+
+	it('should revert when trying to remove more liquidity than owned', async function () {
+		const { ethers, tokenA, tokenB, pool } = await deployFixture();
+
+		const amountA = ethers.parseUnits('1000', 18);
+		const amountB = ethers.parseUnits('1000', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
+		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB)).wait();
+
+		const tooMuchLiquidity = ethers.parseUnits('1500', 18);
+
+		await expect(pool.removeLiquidity(tooMuchLiquidity)).to.be.rejected;
+	});
+
+	it('should swap tokenA for tokenB and update reserves', async function () {
+		const { ethers, owner, tokenA, tokenB, pool } = await deployFixture();
+
+		const amountA = ethers.parseUnits('1000', 18);
+		const amountB = ethers.parseUnits('1000', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
+		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB)).wait();
+
+		const swapAmountIn = ethers.parseUnits('100', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), swapAmountIn)).wait();
+
+		const ownerTokenBefore = await tokenB.balanceOf(owner.address);
+
+		const expectedAmountOut =
+			(swapAmountIn * amountB) / (amountA + swapAmountIn);
+
+		const swapTx = await pool.swap(
+			await tokenA.getAddress(),
+			swapAmountIn,
+			expectedAmountOut,
+		);
+		await swapTx.wait();
+
+		const [reserveA, reserveB] = await pool.getReserves();
+
+		expect(await tokenB.balanceOf(owner.address)).to.equal(
+			ownerTokenBefore + expectedAmountOut,
+		);
+
+		expect(reserveA).to.equal(amountA + swapAmountIn);
+		expect(reserveB).to.equal(amountB - expectedAmountOut);
+	});
+
+	it('should revert swap when minAmountOut is too high', async function () {
+		const { ethers, tokenA, tokenB, pool } = await deployFixture();
+
+		const amountA = ethers.parseUnits('1000', 18);
+		const amountB = ethers.parseUnits('1000', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
+		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB)).wait();
+
+		const swapAmountIn = ethers.parseUnits('100', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), swapAmountIn)).wait();
+
+		const unrealisticMinAmountOut = ethers.parseUnits('200', 18);
+
+		await expect(
+			pool.swap(
+				await tokenA.getAddress(),
+				swapAmountIn,
+				unrealisticMinAmountOut,
+			),
+		).to.be.revertedWithCustomError(pool, 'InsufficientOutputAmount');
+	});
+
+	it('should revert swap when tokenIn is invalid', async function () {
+		const { ethers, tokenA, tokenB, pool } = await deployFixture();
+
+		const amountA = ethers.parseUnits('1000', 18);
+		const amountB = ethers.parseUnits('1000', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
+		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB)).wait();
+
+		const fakeTokenAddress = '0x0000000000000000000000000000000000000001';
+		const swapAmountIn = ethers.parseUnits('100', 18);
+
+		await expect(
+			pool.swap(fakeTokenAddress, swapAmountIn, 1),
+		).to.be.revertedWithCustomError(pool, 'InvalidToken');
+	});
+
+	it('should swap tokenB for tokenA and update reserves', async function () {
+		const { ethers, tokenA, tokenB, owner, pool } = await deployFixture();
+
+		const amountA = ethers.parseUnits('1000', 18);
+		const amountB = ethers.parseUnits('1000', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
+		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB)).wait();
+
+		const swapAmountIn = ethers.parseUnits('100', 18);
+
+		await (await tokenB.approve(await pool.getAddress(), swapAmountIn)).wait();
+
+		const ownerTokenABefore = await tokenA.balanceOf(owner.address);
+
+		const expectedAmountOut =
+			(swapAmountIn * amountA) / (amountB + swapAmountIn);
+
+		const swapTx = await pool.swap(
+			await tokenB.getAddress(),
+			swapAmountIn,
+			expectedAmountOut,
+		);
+		await swapTx.wait();
+
+		const [reserveA, reserveB] = await pool.getReserves();
+
+		expect(await tokenA.balanceOf(owner.address)).to.equal(
+			ownerTokenABefore + expectedAmountOut,
+		);
+
+		expect(reserveA).to.equal(amountA - expectedAmountOut);
+		expect(reserveB).to.equal(amountB + swapAmountIn);
+	});
 });

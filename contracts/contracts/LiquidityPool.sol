@@ -56,6 +56,9 @@ contract LiquidityPool is ReentrancyGuard {
     error InvalidAmount();
     error InvalidLiquidityRatio();
     error InsufficientLiquidityMinted();
+    error InsufficientLiquidityBurned();
+    error InvalidToken();
+    error InsufficientOutputAmount();
 
     function addLiquidity(
         uint256 amountA,
@@ -105,5 +108,82 @@ contract LiquidityPool is ReentrancyGuard {
         } else if (y != 0) {
             z = 1;
         }
+    }
+
+    function removeLiquidity(
+        uint256 liquidity
+    ) external nonReentrant returns (uint256 amountA, uint256 amountB) {
+        if (liquidity == 0) revert InvalidAmount();
+
+        uint256 totalLiquidity = lpToken.totalSupply();
+
+        amountA = (liquidity * reserveA) / totalLiquidity;
+        amountB = (liquidity * reserveB) / totalLiquidity;
+
+        if (amountA == 0 || amountB == 0) revert InsufficientLiquidityBurned();
+
+        lpToken.burn(msg.sender, liquidity);
+
+        reserveA -= amountA;
+        reserveB -= amountB;
+
+        tokenA.safeTransfer(msg.sender, amountA);
+        tokenB.safeTransfer(msg.sender, amountB);
+
+        emit LiquidityRemoved(msg.sender, amountA, amountB, liquidity);
+    }
+
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut
+    ) external nonReentrant returns (uint256 amountOut) {
+        if (amountIn == 0) revert InvalidAmount();
+
+        bool isTokenAIn = tokenIn == address(tokenA);
+        bool isTokenBIn = tokenIn == address(tokenB);
+
+        if (!isTokenAIn && !isTokenBIn) revert InvalidToken();
+
+        IERC20 inputToken = isTokenAIn ? tokenA : tokenB;
+        IERC20 outputToken = isTokenAIn ? tokenB : tokenA;
+
+        uint256 reserveIn = isTokenAIn ? reserveA : reserveB;
+        uint256 reserveOut = isTokenAIn ? reserveB : reserveA;
+
+        amountOut = _getAmountOut(amountIn, reserveIn, reserveOut);
+
+        if (amountOut < minAmountOut || amountOut == 0) {
+            revert InsufficientOutputAmount();
+        }
+
+        inputToken.safeTransferFrom(msg.sender, address(this), amountIn);
+
+        if (isTokenAIn) {
+            reserveA += amountIn;
+            reserveB -= amountOut;
+        } else {
+            reserveB += amountIn;
+            reserveA -= amountOut;
+        }
+
+        outputToken.safeTransfer(msg.sender, amountOut);
+
+        emit Swapped(
+            msg.sender,
+            address(inputToken),
+            amountIn,
+            address(outputToken),
+            amountOut
+        );
+    }
+
+    function _getAmountOut(
+        uint256 amountIn,
+        uint256 reserveIn,
+        uint256 reserveOut
+    ) internal pure returns (uint256) {
+        if (reserveIn == 0 || reserveOut == 0) return 0;
+        return (amountIn * reserveOut) / (reserveIn + amountIn);
     }
 }
