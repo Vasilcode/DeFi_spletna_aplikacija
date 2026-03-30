@@ -54,43 +54,48 @@ contract LiquidityPool is ReentrancyGuard {
     }
 
     error InvalidAmount();
-    error InvalidLiquidityRatio();
     error InsufficientLiquidityMinted();
     error InsufficientLiquidityBurned();
     error InvalidToken();
     error InsufficientOutputAmount();
+    error InsufficientAAmount();
+    error InsufficientBAmount();
+    error UnsupportedTokenBehavior();
 
     function addLiquidity(
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin
+    )
+        external
+        nonReentrant
+        returns (uint256 amountA, uint256 amountB, uint256 liquidityMinted)
+    {
+        return
+            _addLiquidity(
+                amountADesired,
+                amountBDesired,
+                amountAMin,
+                amountBMin
+            );
+    }
+
+    function addLiquidityExact(
         uint256 amountA,
         uint256 amountB
     ) external nonReentrant returns (uint256 liquidityMinted) {
-        if (amountA == 0 || amountB == 0) revert InvalidAmount();
+        (, , liquidityMinted) = _addLiquidity(
+            amountA,
+            amountB,
+            amountA,
+            amountB
+        );
+    }
 
-        uint256 currentTotalLiquidity = lpToken.totalSupply();
-
-        if (reserveA == 0 && reserveB == 0) {
-            liquidityMinted = _sqrt(amountA * amountB);
-        } else {
-            if (amountA * reserveB != amountB * reserveA) {
-                revert InvalidLiquidityRatio();
-            }
-
-            uint256 liquidityA = (amountA * currentTotalLiquidity) / reserveA;
-            uint256 liquidityB = (amountB * currentTotalLiquidity) / reserveB;
-            liquidityMinted = _min(liquidityA, liquidityB);
-        }
-
-        if (liquidityMinted == 0) revert InsufficientLiquidityMinted();
-
-        tokenA.safeTransferFrom(msg.sender, address(this), amountA);
-        tokenB.safeTransferFrom(msg.sender, address(this), amountB);
-
-        reserveA += amountA;
-        reserveB += amountB;
-
-        lpToken.mint(msg.sender, liquidityMinted);
-
-        emit LiquidityAdded(msg.sender, amountA, amountB, liquidityMinted);
+    function sync() external {
+        (uint256 balanceA, uint256 balanceB) = _getBalances();
+        _updateReserves(balanceA, balanceB);
     }
 
     function _min(uint256 a, uint256 b) internal pure returns (uint256) {
@@ -110,25 +115,140 @@ contract LiquidityPool is ReentrancyGuard {
         }
     }
 
+    function _quote(
+        uint256 amountIn,
+        uint256 reserveIn,
+        uint256 reserveOut
+    ) internal pure returns (uint256 amountOut) {
+        if (amountIn == 0 || reserveIn == 0 || reserveOut == 0) return 0;
+        amountOut = (amountIn * reserveOut) / reserveIn;
+    }
+
+    function _getBalances() internal view returns (uint256, uint256) {
+        return (tokenA.balanceOf(address(this)), tokenB.balanceOf(address(this)));
+    }
+
+    function _updateReserves(uint256 balanceA, uint256 balanceB) internal {
+        reserveA = balanceA;
+        reserveB = balanceB;
+    }
+
+    function _safeTransferIn(
+        IERC20 token,
+        uint256 amount,
+        uint256 balanceBefore
+    ) internal returns (uint256 actualAmount) {
+        token.safeTransferFrom(msg.sender, address(this), amount);
+
+        actualAmount = token.balanceOf(address(this)) - balanceBefore;
+        if (actualAmount != amount) revert UnsupportedTokenBehavior();
+    }
+
+    function _safeTransferOut(IERC20 token, address to, uint256 amount) internal {
+        uint256 recipientBalanceBefore = token.balanceOf(to);
+
+        token.safeTransfer(to, amount);
+
+        uint256 actualAmount = token.balanceOf(to) - recipientBalanceBefore;
+        if (actualAmount != amount) revert UnsupportedTokenBehavior();
+    }
+
+    function _addLiquidity(
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin
+    )
+        internal
+        returns (uint256 amountA, uint256 amountB, uint256 liquidityMinted)
+    {
+        if (amountADesired == 0 || amountBDesired == 0) revert InvalidAmount();
+
+        (uint256 balanceABefore, uint256 balanceBBefore) = _getBalances();
+        uint256 currentTotalLiquidity = lpToken.totalSupply();
+
+        if (currentTotalLiquidity == 0) {
+            if (amountADesired < amountAMin) revert InsufficientAAmount();
+            if (amountBDesired < amountBMin) revert InsufficientBAmount();
+
+            amountA = amountADesired;
+            amountB = amountBDesired;
+        } else {
+            uint256 amountBOptimal = _quote(
+                amountADesired,
+                balanceABefore,
+                balanceBBefore
+            );
+
+            if (amountBOptimal <= amountBDesired) {
+                if (amountADesired < amountAMin) revert InsufficientAAmount();
+                if (amountBOptimal < amountBMin) revert InsufficientBAmount();
+
+                amountA = amountADesired;
+                amountB = amountBOptimal;
+            } else {
+                uint256 amountAOptimal = _quote(
+                    amountBDesired,
+                    balanceBBefore,
+                    balanceABefore
+                );
+
+                if (amountAOptimal < amountAMin) revert InsufficientAAmount();
+                if (amountBDesired < amountBMin) revert InsufficientBAmount();
+
+                amountA = amountAOptimal;
+                amountB = amountBDesired;
+            }
+        }
+
+        tokenA.safeTransferFrom(msg.sender, address(this), amountA);
+        tokenB.safeTransferFrom(msg.sender, address(this), amountB);
+
+        (uint256 balanceAAfter, uint256 balanceBAfter) = _getBalances();
+        uint256 receivedA = balanceAAfter - balanceABefore;
+        uint256 receivedB = balanceBAfter - balanceBBefore;
+
+        if (receivedA != amountA || receivedB != amountB) {
+            revert UnsupportedTokenBehavior();
+        }
+
+        if (currentTotalLiquidity == 0) {
+            liquidityMinted = _sqrt(receivedA * receivedB);
+        } else {
+            uint256 liquidityA = (receivedA * currentTotalLiquidity) /
+                balanceABefore;
+            uint256 liquidityB = (receivedB * currentTotalLiquidity) /
+                balanceBBefore;
+            liquidityMinted = _min(liquidityA, liquidityB);
+        }
+
+        if (liquidityMinted == 0) revert InsufficientLiquidityMinted();
+
+        lpToken.mint(msg.sender, liquidityMinted);
+        _updateReserves(balanceAAfter, balanceBAfter);
+
+        emit LiquidityAdded(msg.sender, receivedA, receivedB, liquidityMinted);
+    }
+
     function removeLiquidity(
         uint256 liquidity
     ) external nonReentrant returns (uint256 amountA, uint256 amountB) {
         if (liquidity == 0) revert InvalidAmount();
 
+        (uint256 balanceABefore, uint256 balanceBBefore) = _getBalances();
         uint256 totalLiquidity = lpToken.totalSupply();
 
-        amountA = (liquidity * reserveA) / totalLiquidity;
-        amountB = (liquidity * reserveB) / totalLiquidity;
+        amountA = (liquidity * balanceABefore) / totalLiquidity;
+        amountB = (liquidity * balanceBBefore) / totalLiquidity;
 
         if (amountA == 0 || amountB == 0) revert InsufficientLiquidityBurned();
 
         lpToken.burn(msg.sender, liquidity);
+        _safeTransferOut(tokenA, msg.sender, amountA);
+        _safeTransferOut(tokenB, msg.sender, amountB);
 
-        reserveA -= amountA;
-        reserveB -= amountB;
-
-        tokenA.safeTransfer(msg.sender, amountA);
-        tokenB.safeTransfer(msg.sender, amountB);
+        (uint256 balanceAAfter, uint256 balanceBAfter) = _getBalances();
+        _updateReserves(balanceAAfter, balanceBAfter);
 
         emit LiquidityRemoved(msg.sender, amountA, amountB, liquidity);
     }
@@ -141,38 +261,32 @@ contract LiquidityPool is ReentrancyGuard {
         if (amountIn == 0) revert InvalidAmount();
 
         bool isTokenAIn = tokenIn == address(tokenA);
-        bool isTokenBIn = tokenIn == address(tokenB);
-
-        if (!isTokenAIn && !isTokenBIn) revert InvalidToken();
+        if (!isTokenAIn && tokenIn != address(tokenB)) revert InvalidToken();
 
         IERC20 inputToken = isTokenAIn ? tokenA : tokenB;
         IERC20 outputToken = isTokenAIn ? tokenB : tokenA;
 
-        uint256 reserveIn = isTokenAIn ? reserveA : reserveB;
-        uint256 reserveOut = isTokenAIn ? reserveB : reserveA;
+        (uint256 balanceABefore, uint256 balanceBBefore) = _getBalances();
+        uint256 reserveIn = isTokenAIn ? balanceABefore : balanceBBefore;
+        uint256 reserveOut = isTokenAIn ? balanceBBefore : balanceABefore;
 
-        amountOut = _getAmountOut(amountIn, reserveIn, reserveOut);
+        uint256 actualAmountIn = _safeTransferIn(inputToken, amountIn, reserveIn);
+
+        amountOut = _getAmountOut(actualAmountIn, reserveIn, reserveOut);
 
         if (amountOut < minAmountOut || amountOut == 0) {
             revert InsufficientOutputAmount();
         }
 
-        inputToken.safeTransferFrom(msg.sender, address(this), amountIn);
+        _safeTransferOut(outputToken, msg.sender, amountOut);
 
-        if (isTokenAIn) {
-            reserveA += amountIn;
-            reserveB -= amountOut;
-        } else {
-            reserveB += amountIn;
-            reserveA -= amountOut;
-        }
-
-        outputToken.safeTransfer(msg.sender, amountOut);
+        (uint256 balanceAAfter, uint256 balanceBAfter) = _getBalances();
+        _updateReserves(balanceAAfter, balanceBAfter);
 
         emit Swapped(
             msg.sender,
             address(inputToken),
-            amountIn,
+            actualAmountIn,
             address(outputToken),
             amountOut
         );

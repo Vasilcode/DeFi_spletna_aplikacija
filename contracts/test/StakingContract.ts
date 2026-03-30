@@ -65,9 +65,8 @@ describe('StakingContract', function () {
 		const stakeAmount = ethers.parseUnits('1000', 18);
 		const rewardFunding = ethers.parseUnits('10000', 18);
 
-		await (
-			await token.transfer(await staking.getAddress(), rewardFunding)
-		).wait();
+		await (await token.approve(await staking.getAddress(), rewardFunding)).wait();
+		await (await staking.fundRewards(rewardFunding)).wait();
 
 		await (await token.approve(await staking.getAddress(), stakeAmount)).wait();
 		await (await staking.stake(stakeAmount)).wait();
@@ -83,6 +82,34 @@ describe('StakingContract', function () {
 
 		expect(ownerBalanceAfter).to.be.gt(ownerBalanceBefore);
 		expect(await staking.pendingRewards(owner.address)).to.equal(0n);
+	});
+
+	it('should not accrue rewards for time before rewards are funded', async function () {
+		const { ethers, owner, token, staking } = await deployFixture();
+
+		const stakeAmount = ethers.parseUnits('1000', 18);
+		const rewardFunding = ethers.parseUnits('10000', 18);
+
+		await (await token.approve(await staking.getAddress(), stakeAmount)).wait();
+		await (await staking.stake(stakeAmount)).wait();
+
+		await ethers.provider.send('evm_increaseTime', [100]);
+		await ethers.provider.send('evm_mine', []);
+
+		await (await token.approve(await staking.getAddress(), rewardFunding)).wait();
+		await (await staking.fundRewards(rewardFunding)).wait();
+
+		await ethers.provider.send('evm_increaseTime', [10]);
+		await ethers.provider.send('evm_mine', []);
+
+		const ownerBalanceBefore = await token.balanceOf(owner.address);
+
+		await (await staking.claimRewards()).wait();
+
+		const claimedReward = (await token.balanceOf(owner.address)) - ownerBalanceBefore;
+
+		expect(claimedReward).to.be.gt(0n);
+		expect(claimedReward).to.be.lt(ethers.parseUnits('20', 18));
 	});
 
 	it('should revert when trying to stake zero tokens', async function () {
@@ -108,12 +135,7 @@ describe('StakingContract', function () {
 	});
 
 	it('should revert when trying to claim rewards with no rewards accrued', async function () {
-		const { ethers, token, staking } = await deployFixture();
-
-		const stakeAmount = ethers.parseUnits('1000', 18);
-
-		await (await token.approve(await staking.getAddress(), stakeAmount)).wait();
-		await (await staking.stake(stakeAmount)).wait();
+		const { staking } = await deployFixture();
 
 		await expect(staking.claimRewards()).to.be.revertedWithCustomError(
 			staking,
@@ -121,15 +143,14 @@ describe('StakingContract', function () {
 		);
 	});
 
-	it('should revert when reward pool is insufficient', async function () {
-		const { ethers, token, staking } = await deployFixture();
+	it('should cap rewards to the funded reward pool', async function () {
+		const { ethers, owner, token, staking } = await deployFixture();
 
 		const stakeAmount = ethers.parseUnits('1000', 18);
 		const rewardFunding = ethers.parseUnits('10', 18);
 
-		await (
-			await token.transfer(await staking.getAddress(), rewardFunding)
-		).wait();
+		await (await token.approve(await staking.getAddress(), rewardFunding)).wait();
+		await (await staking.fundRewards(rewardFunding)).wait();
 
 		await (await token.approve(await staking.getAddress(), stakeAmount)).wait();
 		await (await staking.stake(stakeAmount)).wait();
@@ -137,9 +158,14 @@ describe('StakingContract', function () {
 		await ethers.provider.send('evm_increaseTime', [100]);
 		await ethers.provider.send('evm_mine', []);
 
-		await expect(staking.claimRewards()).to.be.revertedWithCustomError(
-			staking,
-			'InsufficientRewardPool',
-		);
+		const ownerBalanceBefore = await token.balanceOf(owner.address);
+
+		await (await staking.claimRewards()).wait();
+
+		const claimedReward = (await token.balanceOf(owner.address)) - ownerBalanceBefore;
+
+		expect(claimedReward).to.equal(rewardFunding);
+		expect(await staking.pendingRewards(owner.address)).to.equal(0n);
+		expect(await staking.reservedRewards()).to.equal(0n);
 	});
 });

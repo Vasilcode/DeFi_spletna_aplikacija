@@ -5,10 +5,11 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract StakingContract is ReentrancyGuard {
+contract YieldFarming is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable stakingToken;
+    IERC20 public immutable lpToken;
+    IERC20 public immutable rewardToken;
     uint256 public immutable rewardRatePerSecond;
     uint256 public totalStaked;
     uint256 public reservedRewards;
@@ -30,19 +31,23 @@ contract StakingContract is ReentrancyGuard {
     error InvalidRewardRate();
     error UnsupportedTokenBehavior();
 
-    constructor(address stakingToken_, uint256 rewardRatePerSecond_) {
-        require(stakingToken_ != address(0), "Invalid staking token");
+    constructor(
+        address lpToken_,
+        address rewardToken_,
+        uint256 rewardRatePerSecond_
+    ) {
+        require(lpToken_ != address(0), "Invalid LP token");
+        require(rewardToken_ != address(0), "Invalid reward token");
+        require(lpToken_ != rewardToken_, "Tokens must differ");
         if (rewardRatePerSecond_ == 0) revert InvalidRewardRate();
 
-        stakingToken = IERC20(stakingToken_);
+        lpToken = IERC20(lpToken_);
+        rewardToken = IERC20(rewardToken_);
         rewardRatePerSecond = rewardRatePerSecond_;
     }
 
     function _availableRewardPool() internal view returns (uint256) {
-        return
-            stakingToken.balanceOf(address(this)) -
-            totalStaked -
-            reservedRewards;
+        return rewardToken.balanceOf(address(this)) - reservedRewards;
     }
 
     function _updateRewards(address user) internal {
@@ -79,11 +84,11 @@ contract StakingContract is ReentrancyGuard {
         if (amount == 0) revert InvalidAmount();
 
         bool wasEmpty = _availableRewardPool() == 0;
-        uint256 balanceBefore = stakingToken.balanceOf(address(this));
+        uint256 balanceBefore = rewardToken.balanceOf(address(this));
 
-        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        rewardToken.safeTransferFrom(msg.sender, address(this), amount);
 
-        uint256 received = stakingToken.balanceOf(address(this)) - balanceBefore;
+        uint256 received = rewardToken.balanceOf(address(this)) - balanceBefore;
         if (received != amount) revert UnsupportedTokenBehavior();
 
         if (wasEmpty) {
@@ -98,7 +103,7 @@ contract StakingContract is ReentrancyGuard {
 
         _updateRewards(msg.sender);
 
-        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        lpToken.safeTransferFrom(msg.sender, address(this), amount);
 
         stakedBalance[msg.sender] += amount;
         totalStaked += amount;
@@ -116,7 +121,7 @@ contract StakingContract is ReentrancyGuard {
         stakedBalance[msg.sender] -= amount;
         totalStaked -= amount;
 
-        stakingToken.safeTransfer(msg.sender, amount);
+        lpToken.safeTransfer(msg.sender, amount);
 
         emit Unstaked(msg.sender, amount);
     }
@@ -130,7 +135,7 @@ contract StakingContract is ReentrancyGuard {
         pendingRewards[msg.sender] = 0;
         reservedRewards -= reward;
 
-        stakingToken.safeTransfer(msg.sender, reward);
+        rewardToken.safeTransfer(msg.sender, reward);
 
         emit RewardsClaimed(msg.sender, reward);
     }

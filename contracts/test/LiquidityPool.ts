@@ -4,7 +4,7 @@ import { network } from 'hardhat';
 describe('LiquidityPool', function () {
 	async function deployFixture() {
 		const { ethers } = await network.connect();
-		const [owner] = await ethers.getSigners();
+		const [owner, user] = await ethers.getSigners();
 
 		const initialSupply = ethers.parseUnits('1000000', 18);
 
@@ -28,7 +28,7 @@ describe('LiquidityPool', function () {
 		]);
 		await pool.waitForDeployment();
 
-		return { ethers, owner, tokenA, tokenB, pool, initialSupply };
+		return { ethers, owner, user, tokenA, tokenB, pool, initialSupply };
 	}
 
 	it('should add initial liquidity and mint LP tokens', async function () {
@@ -43,7 +43,12 @@ describe('LiquidityPool', function () {
 		const approveBTx = await tokenB.approve(await pool.getAddress(), amountB);
 		await approveBTx.wait();
 
-		const addLiquidityTx = await pool.addLiquidity(amountA, amountB);
+		const addLiquidityTx = await pool.addLiquidity(
+			amountA,
+			amountB,
+			amountA,
+			amountB,
+		);
 		await addLiquidityTx.wait();
 
 		const [reserveA, reserveB] = await pool.getReserves();
@@ -60,7 +65,48 @@ describe('LiquidityPool', function () {
 		expect(await lpToken.totalSupply()).to.equal(expectedLiquidity);
 	});
 
-	it('should revert when liquidity is added in the wrong ratio', async function () {
+	it('should honor liquidity minimums when desired amounts are unbalanced', async function () {
+		const { ethers, owner, user, tokenA, tokenB, pool } = await deployFixture();
+
+		const amountA = ethers.parseUnits('1000', 18);
+		const amountB = ethers.parseUnits('1000', 18);
+
+		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
+		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
+
+		const desiredAmountA = ethers.parseUnits('500', 18);
+		const desiredAmountB = ethers.parseUnits('300', 18);
+		const expectedAmountA = ethers.parseUnits('300', 18);
+		const expectedAmountB = ethers.parseUnits('300', 18);
+
+		await (await tokenA.transfer(user.address, desiredAmountA)).wait();
+		await (await tokenB.transfer(user.address, desiredAmountB)).wait();
+		await (
+			await tokenA.connect(user).approve(await pool.getAddress(), desiredAmountA)
+		).wait();
+		await (
+			await tokenB.connect(user).approve(await pool.getAddress(), desiredAmountB)
+		).wait();
+		await (
+			await pool
+				.connect(user)
+				.addLiquidity(desiredAmountA, desiredAmountB, expectedAmountA, expectedAmountB)
+		).wait();
+
+		const [reserveA, reserveB] = await pool.getReserves();
+		const lpTokenAddress = await pool.lpToken();
+		const lpToken = await ethers.getContractAt('LPToken', lpTokenAddress);
+
+		expect(reserveA).to.equal(amountA + expectedAmountA);
+		expect(reserveB).to.equal(amountB + expectedAmountB);
+		expect(await lpToken.balanceOf(owner.address)).to.equal(
+			ethers.parseUnits('1000', 18),
+		);
+		expect(await lpToken.balanceOf(user.address)).to.equal(expectedAmountA);
+	});
+
+	it('should revert when liquidity minimums cannot be met', async function () {
 		const { ethers, tokenA, tokenB, pool } = await deployFixture();
 
 		const amountA = ethers.parseUnits('1000', 18);
@@ -68,7 +114,7 @@ describe('LiquidityPool', function () {
 
 		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
 		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
-		await (await pool.addLiquidity(amountA, amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
 
 		const wrongAmountA = ethers.parseUnits('500', 18);
 		const wrongAmountB = ethers.parseUnits('300', 18);
@@ -77,8 +123,13 @@ describe('LiquidityPool', function () {
 		await (await tokenB.approve(await pool.getAddress(), wrongAmountB)).wait();
 
 		await expect(
-			pool.addLiquidity(wrongAmountA, wrongAmountB),
-		).to.be.revertedWithCustomError(pool, 'InvalidLiquidityRatio');
+			pool.addLiquidity(
+				wrongAmountA,
+				wrongAmountB,
+				wrongAmountA,
+				wrongAmountB,
+			),
+		).to.be.revertedWithCustomError(pool, 'InsufficientAAmount');
 	});
 
 	it('should remove liquidity and return both tokens proportionally', async function () {
@@ -89,7 +140,7 @@ describe('LiquidityPool', function () {
 
 		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
 		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
-		await (await pool.addLiquidity(amountA, amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
 
 		const lpTokenAddress = await pool.lpToken();
 		const lpToken = await ethers.getContractAt('LPToken', lpTokenAddress);
@@ -136,7 +187,7 @@ describe('LiquidityPool', function () {
 
 		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
 		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
-		await (await pool.addLiquidity(amountA, amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
 
 		const tooMuchLiquidity = ethers.parseUnits('1500', 18);
 
@@ -151,7 +202,7 @@ describe('LiquidityPool', function () {
 
 		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
 		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
-		await (await pool.addLiquidity(amountA, amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
 
 		const swapAmountIn = ethers.parseUnits('100', 18);
 
@@ -187,7 +238,7 @@ describe('LiquidityPool', function () {
 
 		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
 		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
-		await (await pool.addLiquidity(amountA, amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
 
 		const swapAmountIn = ethers.parseUnits('100', 18);
 
@@ -212,7 +263,7 @@ describe('LiquidityPool', function () {
 
 		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
 		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
-		await (await pool.addLiquidity(amountA, amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
 
 		const fakeTokenAddress = '0x0000000000000000000000000000000000000001';
 		const swapAmountIn = ethers.parseUnits('100', 18);
@@ -230,7 +281,7 @@ describe('LiquidityPool', function () {
 
 		await (await tokenA.approve(await pool.getAddress(), amountA)).wait();
 		await (await tokenB.approve(await pool.getAddress(), amountB)).wait();
-		await (await pool.addLiquidity(amountA, amountB)).wait();
+		await (await pool.addLiquidity(amountA, amountB, amountA, amountB)).wait();
 
 		const swapAmountIn = ethers.parseUnits('100', 18);
 
