@@ -1,10 +1,21 @@
 # Backend
 
-Ta mapa bo vsebovala read-only podporni sloj:
+Read-only podporni sloj za frontend in diplomsko dokumentacijo.
 
-- analitika
-- zgodovina transakcij
-- TVL in reward podatki
-- REST endpointi za frontend
+Trenutni endpointi:
 
-Backend ne podpisuje transakcij in ne hrani zasebnih kljucev.
+- `GET /api/health`
+- `GET /api/protocol/overview`
+- `GET /api/account/:address/positions`
+
+Namen:
+
+- analitika in agregirani prikazi
+- TVL / APR / reward metrika
+- uporabniske read-only pozicije
+
+Backend:
+
+- ne podpisuje transakcij
+- ne hrani zasebnih kljucev
+- ni source of truth za financno stanje

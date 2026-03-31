@@ -1,71 +1,101 @@
 import { useMemo } from 'react';
-import { formatUnits, parseUnits } from 'viem';
+import { formatUnits, parseUnits, type Address } from 'viem';
 import {
-	useAccount,
-	useReadContract,
-	useWaitForTransactionReceipt,
-	useWriteContract,
+    useAccount,
+    useReadContract,
+    useWaitForTransactionReceipt,
+    useWriteContract,
 } from 'wagmi';
 import { contracts } from '../lib/contracts';
 import { erc20Abi } from '../lib/erc20Abi';
-import { stakingAbi } from '../lib/stakingAbi';
+import { yieldFarmingAbi } from '../lib/yieldFarmingAbi';
 
-export function useStaking(stakeAmount: string, unstakeAmount: string) {
+export function useYieldFarming(stakeAmount: string, unstakeAmount: string) {
 	const { address } = useAccount();
 
-	const decimalsQuery = useReadContract({
-		address: contracts.token,
-		abi: erc20Abi,
-		functionName: 'decimals',
+	const lpTokenAddressQuery = useReadContract({
+		address: contracts.farming,
+		abi: yieldFarmingAbi,
+		functionName: 'lpToken',
 	});
 
-	const decimals = decimalsQuery.data ?? 18;
+	const rewardTokenAddressQuery = useReadContract({
+		address: contracts.farming,
+		abi: yieldFarmingAbi,
+		functionName: 'rewardToken',
+	});
+
+	const lpTokenAddress = lpTokenAddressQuery.data as Address | undefined;
+	const rewardTokenAddress = rewardTokenAddressQuery.data as
+		| Address
+		| undefined;
+
+	const lpDecimalsQuery = useReadContract({
+		address: lpTokenAddress,
+		abi: erc20Abi,
+		functionName: 'decimals',
+		query: {
+			enabled: Boolean(lpTokenAddress),
+		},
+	});
+
+	const rewardDecimalsQuery = useReadContract({
+		address: rewardTokenAddress,
+		abi: erc20Abi,
+		functionName: 'decimals',
+		query: {
+			enabled: Boolean(rewardTokenAddress),
+		},
+	});
+
+	const lpDecimals = lpDecimalsQuery.data ?? 18;
+	const rewardDecimals = rewardDecimalsQuery.data ?? 18;
 
 	const parsedStakeAmount = useMemo(() => {
 		if (!stakeAmount.trim()) return undefined;
 
 		try {
-			return parseUnits(stakeAmount, decimals);
+			return parseUnits(stakeAmount, lpDecimals);
 		} catch {
 			return undefined;
 		}
-	}, [stakeAmount, decimals]);
+	}, [stakeAmount, lpDecimals]);
 
 	const parsedUnstakeAmount = useMemo(() => {
 		if (!unstakeAmount.trim()) return undefined;
 
 		try {
-			return parseUnits(unstakeAmount, decimals);
+			return parseUnits(unstakeAmount, lpDecimals);
 		} catch {
 			return undefined;
 		}
-	}, [unstakeAmount, decimals]);
+	}, [unstakeAmount, lpDecimals]);
 
-	const tokenBalanceQuery = useReadContract({
-		address: contracts.token,
+	const lpBalanceQuery = useReadContract({
+		address: lpTokenAddress,
 		abi: erc20Abi,
 		functionName: 'balanceOf',
 		args: address ? [address] : undefined,
 		query: {
-			enabled: Boolean(address),
+			enabled: Boolean(address && lpTokenAddress),
 			refetchInterval: 2000,
 		},
 	});
 
 	const allowanceQuery = useReadContract({
-		address: contracts.token,
+		address: lpTokenAddress,
 		abi: erc20Abi,
 		functionName: 'allowance',
-		args: address ? [address, contracts.staking] : undefined,
+		args: address ? [address, contracts.farming] : undefined,
 		query: {
-			enabled: Boolean(address),
+			enabled: Boolean(address && lpTokenAddress),
 			refetchInterval: 2000,
 		},
 	});
 
 	const stakedBalanceQuery = useReadContract({
-		address: contracts.staking,
-		abi: stakingAbi,
+		address: contracts.farming,
+		abi: yieldFarmingAbi,
 		functionName: 'stakedBalance',
 		args: address ? [address] : undefined,
 		query: {
@@ -75,8 +105,8 @@ export function useStaking(stakeAmount: string, unstakeAmount: string) {
 	});
 
 	const pendingRewardsQuery = useReadContract({
-		address: contracts.staking,
-		abi: stakingAbi,
+		address: contracts.farming,
+		abi: yieldFarmingAbi,
 		functionName: 'pendingRewards',
 		args: address ? [address] : undefined,
 		query: {
@@ -129,8 +159,8 @@ export function useStaking(stakeAmount: string, unstakeAmount: string) {
 		hash: claimHash,
 	});
 
+	const lpBalance = lpBalanceQuery.data;
 	const allowance = allowanceQuery.data;
-	const tokenBalance = tokenBalanceQuery.data;
 	const stakedBalance = stakedBalanceQuery.data;
 	const pendingRewards = pendingRewardsQuery.data;
 
@@ -156,13 +186,13 @@ export function useStaking(stakeAmount: string, unstakeAmount: string) {
 		approveError?.message;
 
 	function approve() {
-		if (!parsedStakeAmount) return;
+		if (!parsedStakeAmount || !lpTokenAddress) return;
 
 		writeApprove({
-			address: contracts.token,
+			address: lpTokenAddress,
 			abi: erc20Abi,
 			functionName: 'approve',
-			args: [contracts.staking, parsedStakeAmount],
+			args: [contracts.farming, parsedStakeAmount],
 		});
 	}
 
@@ -170,8 +200,8 @@ export function useStaking(stakeAmount: string, unstakeAmount: string) {
 		if (!parsedStakeAmount) return;
 
 		writeStake({
-			address: contracts.staking,
-			abi: stakingAbi,
+			address: contracts.farming,
+			abi: yieldFarmingAbi,
 			functionName: 'stake',
 			args: [parsedStakeAmount],
 		});
@@ -181,8 +211,8 @@ export function useStaking(stakeAmount: string, unstakeAmount: string) {
 		if (!parsedUnstakeAmount) return;
 
 		writeUnstake({
-			address: contracts.staking,
-			abi: stakingAbi,
+			address: contracts.farming,
+			abi: yieldFarmingAbi,
 			functionName: 'unstake',
 			args: [parsedUnstakeAmount],
 		});
@@ -190,8 +220,8 @@ export function useStaking(stakeAmount: string, unstakeAmount: string) {
 
 	function claimRewards() {
 		writeClaim({
-			address: contracts.staking,
-			abi: stakingAbi,
+			address: contracts.farming,
+			abi: yieldFarmingAbi,
 			functionName: 'claimRewards',
 		});
 	}
@@ -199,19 +229,17 @@ export function useStaking(stakeAmount: string, unstakeAmount: string) {
 	return {
 		isStakeAmountValid: parsedStakeAmount !== undefined,
 		isUnstakeAmountValid: parsedUnstakeAmount !== undefined,
-		tokenBalanceFormatted:
-			tokenBalance !== undefined
-				? formatUnits(tokenBalance, decimals)
-				: undefined,
+		lpBalanceFormatted:
+			lpBalance !== undefined ? formatUnits(lpBalance, lpDecimals) : undefined,
 		allowanceFormatted:
-			allowance !== undefined ? formatUnits(allowance, decimals) : undefined,
+			allowance !== undefined ? formatUnits(allowance, lpDecimals) : undefined,
 		stakedBalanceFormatted:
 			stakedBalance !== undefined
-				? formatUnits(stakedBalance, decimals)
+				? formatUnits(stakedBalance, lpDecimals)
 				: undefined,
 		pendingRewardsFormatted:
 			pendingRewards !== undefined
-				? formatUnits(pendingRewards, decimals)
+				? formatUnits(pendingRewards, rewardDecimals)
 				: undefined,
 		errorMessage,
 		needsApproval,

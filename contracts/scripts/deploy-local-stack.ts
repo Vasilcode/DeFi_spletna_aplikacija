@@ -76,6 +76,7 @@ async function main() {
 	console.log(
 		`VITE_APP_REWARD_TOKEN_ADDRESS=${await rewardToken.getAddress()}`,
 	);
+	console.log(`VITE_APP_TOKEN_B_ADDRESS=${await tokenB.getAddress()}`);
 }
 
 main().catch((error) => {

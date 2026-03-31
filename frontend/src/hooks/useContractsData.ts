@@ -1,6 +1,6 @@
 import { useReadContract } from 'wagmi';
 import { contracts } from '../lib/contracts';
-import { erc20ReadAbi } from '../lib/erc20readAbi';
+import { erc20ReadAbi } from '../lib/erc20ReadAbi';
 import { liquidityPoolReadAbi } from '../lib/liquidityPoolReadAbi';
 
 export function useContractsData() {

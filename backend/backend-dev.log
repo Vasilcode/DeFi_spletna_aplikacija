@@ -1,0 +1,7 @@
+
+> backend@1.0.0 dev
+> tsx watch src/server.ts
+
+[dotenv@17.3.1] injecting env (16) from ..\.env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+Backend listening on http://localhost:3001
+^C^C
