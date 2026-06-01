@@ -83,15 +83,24 @@ describe('LiquidityPool', function () {
 		await (await tokenA.transfer(user.address, desiredAmountA)).wait();
 		await (await tokenB.transfer(user.address, desiredAmountB)).wait();
 		await (
-			await tokenA.connect(user).approve(await pool.getAddress(), desiredAmountA)
+			await tokenA
+				.connect(user)
+				.approve(await pool.getAddress(), desiredAmountA)
 		).wait();
 		await (
-			await tokenB.connect(user).approve(await pool.getAddress(), desiredAmountB)
+			await tokenB
+				.connect(user)
+				.approve(await pool.getAddress(), desiredAmountB)
 		).wait();
 		await (
 			await pool
 				.connect(user)
-				.addLiquidity(desiredAmountA, desiredAmountB, expectedAmountA, expectedAmountB)
+				.addLiquidity(
+					desiredAmountA,
+					desiredAmountB,
+					expectedAmountA,
+					expectedAmountB,
+				)
 		).wait();
 
 		const [reserveA, reserveB] = await pool.getReserves();
@@ -123,12 +132,7 @@ describe('LiquidityPool', function () {
 		await (await tokenB.approve(await pool.getAddress(), wrongAmountB)).wait();
 
 		await expect(
-			pool.addLiquidity(
-				wrongAmountA,
-				wrongAmountB,
-				wrongAmountA,
-				wrongAmountB,
-			),
+			pool.addLiquidity(wrongAmountA, wrongAmountB, wrongAmountA, wrongAmountB),
 		).to.be.revertedWithCustomError(pool, 'InsufficientAAmount');
 	});
 
@@ -191,7 +195,7 @@ describe('LiquidityPool', function () {
 
 		const tooMuchLiquidity = ethers.parseUnits('1500', 18);
 
-		await expect(pool.removeLiquidity(tooMuchLiquidity)).to.be.rejected;
+		await expect(pool.removeLiquidity(tooMuchLiquidity)).to.revert(ethers);
 	});
 
 	it('should swap tokenA for tokenB and update reserves', async function () {
