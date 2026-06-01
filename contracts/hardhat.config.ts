@@ -1,6 +1,8 @@
 import hardhatToolboxMochaEthersPlugin from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
 import { configVariable, defineConfig } from "hardhat/config";
 
+const dockerLocalRpcUrl = process.env.DOCKER_LOCAL_RPC_URL ?? "http://hardhat:8545";
+
 export default defineConfig({
   plugins: [hardhatToolboxMochaEthersPlugin],
   solidity: {
@@ -27,6 +29,11 @@ export default defineConfig({
     hardhatOp: {
       type: "edr-simulated",
       chainType: "op",
+    },
+    dockerlocal: {
+      type: "http",
+      chainType: "l1",
+      url: dockerLocalRpcUrl,
     },
     sepolia: {
       type: "http",
