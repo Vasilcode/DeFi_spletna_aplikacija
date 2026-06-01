@@ -12,6 +12,22 @@ Projekt vsebuje celoten lokalni DeFi stack:
 - React frontend z Web3 povezavo
 - read-only backend za analitiko in agregacijo podatkov
 
+## Opomba glede predstavitve in oddaje
+
+Ta repozitorij je pripravljen za **lokalno predstavitev prototipa**. V sklopu oddaje in predstavitve aplikacija ni objavljena kot javen `Sepolia + Vercel` deployment, ampak se zaganja lokalno z uporabo:
+- lokalnega `Hardhat` blockchaina
+- lokalnega backend read layerja
+- lokalnega frontend okolja
+
+Takšna odloèitev je bila sprejeta zaradi bolj zanesljive, ponovljive in nadzorovane predstavitve prototipa. Lokalni zagon odpravi odvisnost od zunanjih testnet faucetov, javnih RPC omejitev, razpolozljivosti tretjih storitev in morebitnih sprememb v stanju javnega testnega omrezja.
+
+Projektna struktura sicer ze vsebuje osnovo za kasnejsi `Sepolia` deployment:
+- `sepolia` omrezje v `Hardhat` konfiguraciji
+- okoljske spremenljivke za javni RPC
+- frontend in backend konfiguracijo prek root `.env`
+
+Za potrebe diplomskega prototipa in predstavitve je uradno podprt predvsem lokalni demo potek, opisan v nadaljevanju tega README-ja.
+
 ## Glavne funkcionalnosti
 
 - povezava z MetaMask prek `wagmi + viem`
@@ -297,4 +313,3 @@ Ta repozitorij predstavlja delujoc diplomski prototip, namenjen:
 - predstavitvi implementacije DeFi modulov
 - lokalnemu testiranju prek Hardhat omrezja
 - pregledu kode, testov in arhitekture
-
